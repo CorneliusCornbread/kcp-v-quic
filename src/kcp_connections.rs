@@ -1,94 +1,61 @@
-use std::{io::Write, net::{UdpSocket, SocketAddr}};
+use anyhow::Result;
 use kcp::Kcp;
+use std::{
+    io::Write,
+    net::{ToSocketAddrs, UdpSocket},
+    sync::{Arc, RwLock},
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 
 pub const KCP_CONV: u32 = 12;
 
-pub struct WriteableUdpSocket {
-    pub raw_socket: UdpSocket
+pub struct KcpSession {
+    pub kcp: Arc<RwLock<Kcp<Vec<u8>>>>,
+    pub rec_thread: Option<JoinHandle<()>>,
 }
 
-impl WriteableUdpSocket {
-    pub fn new_connection(address: SocketAddr) -> anyhow::Result<WriteableUdpSocket> {
-        let writeable = WriteableUdpSocket {
-            raw_socket: UdpSocket::bind(address)?,
-        };
+impl KcpSession {
+    pub fn spawn_rec_thread(&mut self) {
+        let socket_ref = self.kcp.clone();
 
-        Ok(writeable)
-    }
-}
+        let thread_handle = thread::spawn(move || {
+            loop {
+                let mut buf = Vec::new();
+                let mut socket = socket_ref.write().unwrap();
+                let _ = socket.recv(&mut buf); //TODO: log errors
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
 
-impl Write for WriteableUdpSocket {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.raw_socket.send(buf);
-        Ok(8)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-
-pub struct KcpSocket {
-    pub kcp_connection: Kcp<WriteableUdpSocket>
-}
-
-impl Default for KcpSocket {
-    fn default() -> Self {
-        Self { socket: Udp, kcp_connection: todo!()  }
-    }
-}
-
-impl Write for KcpSocket {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut output = self.data.lock().expect("Unable to get mutex, is somethign else using the mutex on this thread?");
-        output.write(buf)?;
-        Ok(buf.len())
+        self.rec_thread = Some(thread_handle);
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        let mut output = self.data.lock().expect("Unable to get mutex, is somethign else using the mutex on this thread?");
-        output.flush()?;
-        Ok(())
-    }
-}
-
-pub struct KcpServer {
-    pub kcp_connection: Kcp<KcpSocket>
-
-}
-
-impl KcpServer {
-    pub fn open_rec_stream(&self) {
-        
-    }
-
-    fn spawn_rec_thread(&self) {
-        let mut buf = Vec::new();
-        self.kcp_connection.recv(&mut buf);
-    }
-}
-
-impl Default for KcpServer {
-    fn default() -> Self {
-        Self { kcp_connection: Kcp::new_stream(KCP_CONV, Default::default()) }
+    pub fn new_bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+        Ok(Self {
+            kcp: Arc::new(RwLock::new(Kcp::<Vec<u8>>::new_stream(
+                KCP_CONV,
+                Vec::new(),
+            ))),
+            rec_thread: None,
+        })
     }
 }
 
 pub struct KcpConnections {
-    pub client: Kcp<KcpSocket>,
-    pub server: KcpServer,
+    pub client: KcpSession,
+    pub server: KcpSession,
 
     pub client_send: Vec<u8>,
     pub server_send: Vec<u8>,
 }
 
 impl KcpConnections {
-    pub fn start_client_server(&self) {
-        
-    }
+    pub fn start_client_server(&mut self) {
+        let client = &mut self.client;
+        let server = &mut self.server;
 
-    pub fn run(&self) -> Result<(), String> {
-        todo!()
+        server.spawn_rec_thread();
+        client.spawn_rec_thread();
     }
 }
