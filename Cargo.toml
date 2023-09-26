@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 benchmark-rs = "0.1.1"
-kcp = "0.5.3"
 poloto = "19.1.2"
 s2n-quic = "1.28.0"
-tokio = "1.32.0"
+tokio = { version = "1.32.0", features = ["full"] }
+tokio_kcp = "0.9.6"
